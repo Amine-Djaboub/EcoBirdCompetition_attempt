@@ -5,8 +5,12 @@ import cv2
 import os
 from .detector import MockBirdDetector
 from .agent import fetch_species_info
+import gradio as gr
+import pandas as pd
+from app.video_processor import process_video_pipeline
+from app.agent import fetch_species_info
 
-class NatureThemeGUI:
+""" class NatureThemeGUI:
     def __init__(self, root):
         self.root = root
         self.root.title("EcoBird Counter - 24h Hackathon Starter")
@@ -122,163 +126,81 @@ class NatureThemeGUI:
             self.agent_text.config(state=tk.DISABLED)
 
     def show_species_info(self):
-        self.update_agent_panel(None)
+        self.update_agent_panel(None) """
 
-# # app/main_gui.py
-# import gradio as gr
-# import time
-# import pandas as pd
-# from .detector import MockBirdDetector
-# from .agent import fetch_species_info
+# 🎨 Custom Nature Theme CSS (FIXED FOR INVISIBLE TEXT)
+NATURE_CSS = """
+.gradio-container { 
+    background: linear-gradient(160deg, #f8faf8 0%, #eef5ee 100%); 
+    font-family: 'Inter', sans-serif; 
+}
+h1 { color: #1b4332 !important; font-weight: 800; text-align: center; }
+.subtitle { text-align: center; color: #40916c !important; margin-bottom: 20px; }
 
-# # 🎨 Custom Nature Theme CSS
-# NATURE_CSS = """
-# .gradio-container {
-#     background: linear-gradient(160deg, #f8faf8 0%, #eef5ee 100%);
-#     font-family: 'Inter', 'Segoe UI', system-ui, -apple-system, sans-serif;
-#     max-width: 1200px !important;
-#     margin: 0 auto;
-#     padding: 24px;
-# }
-# h1 {
-#     color: #1b4332;
-#     font-weight: 800;
-#     text-align: center;
-#     margin-bottom: 4px;
-#     letter-spacing: -0.5px;
-# }
-# .subtitle {
-#     text-align: center;
-#     color: #40916c;
-#     font-size: 1.05em;
-#     margin-bottom: 20px;
-#     font-weight: 500;
-# }
-# .gr-box {
-#     background: #ffffff !important;
-#     border: 1px solid #d1e7d1 !important;
-#     border-radius: 16px !important;
-#     box-shadow: 0 6px 20px rgba(45, 106, 79, 0.08) !important;
-#     transition: all 0.2s ease;
-# }
-# .gr-box:hover {
-#     box-shadow: 0 8px 24px rgba(45, 106, 79, 0.12) !important;
-# }
-# .gr-button-primary {
-#     background: linear-gradient(135deg, #2d6a4f 0%, #40916c 100%) !important;
-#     border: none !important;
-#     border-radius: 12px !important;
-#     font-weight: 600 !important;
-#     font-size: 1em !important;
-#     box-shadow: 0 4px 12px rgba(45, 106, 79, 0.25) !important;
-# }
-# .gr-button-primary:hover {
-#     background: linear-gradient(135deg, #1b4332 0%, #2d6a4f 100%) !important;
-#     transform: translateY(-1px);
-# }
-# table th {
-#     background: #e8f5e9 !important;
-#     color: #0b2a1d !important;
-#     font-weight: 600 !important;
-# }
-# .ai-panel {
-#     background: linear-gradient(135deg, #f0f9f0 0%, #e6f2e6 100%) !important;
-#     border-left: 4px solid #40916c !important;
-#     padding: 18px !important;
-#     border-radius: 12px !important;
-#     min-height: 180px;
-# }
-# .gr-form {
-#     border-radius: 16px !important;
-# }
-# """
+/* Force the panel and ALL text inside it to be dark green/black, ignoring dark mode */
+.ai-panel { 
+    background: #e6f2e6 !important; 
+    border-left: 4px solid #40916c !important; 
+    padding: 18px !important; 
+    border-radius: 12px !important; 
+    color: #0b2a1d !important; 
+}
+.ai-panel h3, .ai-panel p, .ai-panel strong, .ai-panel em { 
+    color: #0b2a1d !important; 
+}
+"""
 
-# detector = MockBirdDetector()
-# RESULTS_STATE = pd.DataFrame()
+def handle_video(video_path, progress=gr.Progress()):
+    if not video_path:
+        return pd.DataFrame(), "*Upload a video to start detection.*"
 
-# def process_video(video_path, progress=gr.Progress()):
-#     """Mock pipeline with realistic progress tracking."""
-#     global RESULTS_STATE
-#     if not video_path:
-#         gr.Warning("Please upload a video file to begin.")
-#         return "*Upload a video to start detection.*"
-
-#     progress(0, desc="🔍 Initializing model & loading frames...")
-#     time.sleep(0.3)
+    # Call your actual ML pipeline!
+    results_dict = process_video_pipeline(video_path, progress_callback=progress)
     
-#     # Simulate frame-by-frame processing
-#     detections = []
-#     for i in range(100):
-#         progress((i+1)/100, desc=f"🖼️ Processing batch {i+1}/100...")
-#         time.sleep(0.02)
-#         # In real pipeline: detections.append(detector.process_frame(frame, vid_id))
-#         detections.append(detector.process_frame(None, "mock"))
+    # Format the nested dictionary for the Gradio Table
+    table_data = []
+    total_birds = 0
+    
+    for species, data in results_dict.items():
+        table_data.append([species, data["count"], data["confidence"]])
+        total_birds += data["count"]
         
-#     progress(1.0, desc="✅ Aggregating tracks & generating counts...")
-#     counts = detector.aggregate_counts(detections)
-#     RESULTS_STATE = pd.DataFrame(counts.items(), columns=["Species", "Count"])
-#     RESULTS_STATE["Confidence"] = 0.84
+    df = pd.DataFrame(table_data, columns=["Species", "Count", "Confidence"])
     
-#     return f"✅ Detection complete. Found **{len(counts)} species**. Click a row below to view AI insights."
+    return df, f"✅ **Detection complete!** Found **{total_birds} total birds**. Click a row below to view AI insights."
 
-# def get_species_info(evt: gr.SelectData):
-#     """Triggered when user clicks a table row."""
-#     if evt is None or not evt.value:
-#         return "*Click a species in the table above to fetch biodiversity data.*"
+def get_species_info(evt: gr.SelectData):
+    """Triggered when user clicks a table row."""
+    species = str(evt.value[0]) if isinstance(evt.value, (list, tuple)) else str(evt.value)
+    info = fetch_species_info(species)
     
-#     # Gradio passes selected cell value. For dataframe, we extract species name.
-#     species = str(evt.value[0]) if isinstance(evt.value, (list, tuple)) else str(evt.value)
-#     info = fetch_species_info(species)
-    
-#     md = f"### 🌿 {species}\n\n"
-#     for k, v in info.items():
-#         emoji = {"Scientific Name": "🔬", "Conservation Status": "🛡️", "Habitat": "🌲", "Diet": "🐛", "Fun Fact": "💡"}.get(k, "📌")
-#         md += f"**{emoji} {k}:** {v}\n"
-#     return md
+    md = f"### 🌿 {species}\n\n"
+    for k, v in info.items():
+        md += f"**{k}:** {v}\n"
+    return md
 
-# def build_ui():
-#     with gr.Blocks(css=NATURE_CSS, title="🌿 EcoBird AI Counter") as demo:
-#         gr.Markdown("# 🌿 AI Ecology Bird Counter")
-#         gr.Markdown('<p class="subtitle">24h Hackathon Starter • Open-Set Counting & Agentic Profiling</p>')
+def build_ui():
+    # Force light theme base so Dark Mode doesn't mess with our custom CSS
+    with gr.Blocks(theme=gr.themes.Soft(), css=NATURE_CSS, title="EcoBird AI Counter") as demo:
+        gr.Markdown("# 🌿 AI Ecology Bird Counter")
+        gr.Markdown('<p class="subtitle">24h Hackathon Starter • Open-Set Counting & Agentic Profiling</p>')
 
-#         with gr.Row(equal_height=True):
-#             # Left: Video & Controls
-#             with gr.Column(scale=3):
-#                 video_input = gr.Video(
-#                     label="📹 Drop Video Here", 
-#                     format="mp4", 
-#                     interactive=True, 
-#                     elem_id="video-area"
-#                 )
-#                 btn_process = gr.Button("🔍 Run Detection & Count", variant="primary")
+        with gr.Row():
+            with gr.Column(scale=3):
+                video_input = gr.Video(label="📹 Drop Video Here", format="mp4")
+                btn_process = gr.Button("🔍 Run Detection & Count", variant="primary")
                 
-#             # Right: Results & AI Panel
-#             with gr.Column(scale=2):
-#                 results_table = gr.Dataframe(
-#                     label="📊 Species Counts",
-#                     headers=["Species", "Count", "Confidence"],
-#                     interactive=False,
-#                     wrap=True,
-#                     type="pandas"
-#                 )
-#                 ai_panel = gr.Markdown(
-#                     label="🤖 Agentic AI Species Panel", 
-#                     value="*Click a species row to retrieve real-time ecological data.*", 
-#                     elem_classes=["ai-panel"]
-#                 )
+            with gr.Column(scale=2):
+                results_table = gr.Dataframe(
+                    label="📊 Species Counts", headers=["Species", "Count", "Confidence"], interactive=False
+                )
+                ai_panel = gr.Markdown(
+                    label="🤖 Agentic AI Species Panel", 
+                    value="*Click a species row to retrieve real-time ecological data.*", 
+                    elem_classes=["ai-panel"]
+                )
 
-#         # Event Bindings
-#         btn_process.click(
-#             fn=process_video,
-#             inputs=video_input,
-#             outputs=ai_panel,
-#             show_progress=True
-#         )
+        btn_process.click(fn=handle_video, inputs=video_input, outputs=[results_table, ai_panel])
+        results_table.select(fn=get_species_info, inputs=None, outputs=ai_panel)
 
-#         results_table.select(
-#             fn=get_species_info,
-#             inputs=None,
-#             outputs=ai_panel
-#         )
-
-#     return demo
+    return demo
