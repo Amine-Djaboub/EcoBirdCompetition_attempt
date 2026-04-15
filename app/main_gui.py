@@ -129,6 +129,7 @@ from app.agent import fetch_species_info
         self.update_agent_panel(None) """
 
 # 🎨 Custom Nature Theme CSS (FIXED FOR INVISIBLE TEXT)
+# 🎨 Custom Nature Theme CSS 
 NATURE_CSS = """
 .gradio-container { 
     background: linear-gradient(160deg, #f8faf8 0%, #eef5ee 100%); 
@@ -148,16 +149,29 @@ h1 { color: #1b4332 !important; font-weight: 800; text-align: center; }
 .ai-panel h3, .ai-panel p, .ai-panel strong, .ai-panel em { 
     color: #0b2a1d !important; 
 }
+
+/* New custom styling for the Total Count box! */
+.total-box {
+    background: #d8f3dc !important;
+    border: 2px solid #2d6a4f !important;
+    padding: 12px !important;
+    border-radius: 8px !important;
+    text-align: center;
+    font-size: 1.3em;
+    color: #081c15 !important;
+    font-weight: bold;
+    margin-bottom: 10px;
+    box-shadow: 0 4px 6px rgba(0,0,0,0.05);
+}
 """
 
 def handle_video(video_path, progress=gr.Progress()):
     if not video_path:
-        return pd.DataFrame(), "*Upload a video to start detection.*"
+        return pd.DataFrame(), "<div class='total-box'>Total Birds Detected: 0</div>", "*Upload a video to start detection.*", None
 
-    # Call your actual ML pipeline!
-    results_dict = process_video_pipeline(video_path, progress_callback=progress)
+    # 🚨 NEW: Unpack the two returned items
+    results_dict, output_video = process_video_pipeline(video_path, progress_callback=progress)
     
-    # Format the nested dictionary for the Gradio Table
     table_data = []
     total_birds = 0
     
@@ -167,11 +181,20 @@ def handle_video(video_path, progress=gr.Progress()):
         
     df = pd.DataFrame(table_data, columns=["Species", "Count", "Confidence"])
     
-    return df, f"✅ **Detection complete!** Found **{total_birds} total birds**. Click a row below to view AI insights."
+    total_html = f"<div class='total-box'> Total Birds Detected: {total_birds}</div>"
+    ai_message = "✅ **Detection complete!** Click a row below to view AI insights."
+    
+    # 🚨 NEW: Return the output_video at the end
+    return df, total_html, ai_message, output_video
 
 def get_species_info(evt: gr.SelectData):
     """Triggered when user clicks a table row."""
     species = str(evt.value[0]) if isinstance(evt.value, (list, tuple)) else str(evt.value)
+    
+    # 🛑 Safety check: Don't search Wikipedia for "Unknown"
+    if species == "Unknown" or species.strip() == "":
+         return "### 🌿 Unknown Species\n\n*The AI could not confidently identify this bird. No ecological data is available.*"
+         
     info = fetch_species_info(species)
     
     md = f"### 🌿 {species}\n\n"
@@ -180,27 +203,33 @@ def get_species_info(evt: gr.SelectData):
     return md
 
 def build_ui():
-    # Force light theme base so Dark Mode doesn't mess with our custom CSS
     with gr.Blocks(theme=gr.themes.Soft(), css=NATURE_CSS, title="EcoBird AI Counter") as demo:
         gr.Markdown("# 🌿 AI Ecology Bird Counter")
         gr.Markdown('<p class="subtitle">24h Hackathon Starter • Open-Set Counting & Agentic Profiling</p>')
 
         with gr.Row():
             with gr.Column(scale=3):
-                video_input = gr.Video(label="📹 Drop Video Here", format="mp4")
+                video_input = gr.Video(label=" Drop Video Here", format="mp4")
                 btn_process = gr.Button("🔍 Run Detection & Count", variant="primary")
                 
             with gr.Column(scale=2):
+                total_display = gr.HTML("<div class='total-box'>🦅 Total Birds Detected: 0</div>")
+                
                 results_table = gr.Dataframe(
-                    label="📊 Species Counts", headers=["Species", "Count", "Confidence"], interactive=False
+                    label=" Species Counts", headers=["Species", "Count", "Confidence"], interactive=False
                 )
                 ai_panel = gr.Markdown(
-                    label="🤖 Agentic AI Species Panel", 
+                    label=" Agentic AI Species Panel", 
                     value="*Click a species row to retrieve real-time ecological data.*", 
                     elem_classes=["ai-panel"]
                 )
 
-        btn_process.click(fn=handle_video, inputs=video_input, outputs=[results_table, ai_panel])
+        # 🚨 NEW: Add video_input to the outputs! This causes Gradio to swap the video.
+        btn_process.click(
+            fn=handle_video, 
+            inputs=video_input, 
+            outputs=[results_table, total_display, ai_panel, video_input]
+        )
         results_table.select(fn=get_species_info, inputs=None, outputs=ai_panel)
 
     return demo

@@ -52,7 +52,11 @@ try:
 
 except Exception as e:
     print(f"🛑 FATAL ERROR LOADING MODEL: {e}")
-    # ... (Keep the rest of the fallback code here)
+    # Fallback so the UI doesn't crash, but it will guess randomly
+    efficient_model = models.efficientnet_b0(weights=None)
+    efficient_model.classifier[1] = nn.Linear(efficient_model.classifier[1].in_features, 200)
+    efficient_model = efficient_model.to(device)
+    efficient_model.eval()
 
 # --- 2. TRANSFORMS & CLASS NAMES ---
 inference_transform = transforms.Compose([
@@ -76,19 +80,26 @@ except Exception as e:
 
 # --- 3. THE MAIN PIPELINE ---
 def process_video_pipeline(video_path, progress_callback=None):
-    """
-    Takes a video from the Gradio UI, runs the ML pipeline,
-    and returns a clean {Species: Count} dictionary for the frontend.
-    """
     if progress_callback:
-        progress_callback(0.1, desc="🔍 Extracting tracking data...")
+        progress_callback(0.1, desc="🔍 Initializing Video & Tracking...")
 
     id_frame_counts = Counter()
     id_top_crops = defaultdict(list)
     birds_per_frame = []
     frames_active_ids = []
 
-    # Stream=True keeps everything fast and in-memory
+    # Prepare the Video Writer to save the annotated overlay
+    cap = cv2.VideoCapture(video_path)
+    fps = cap.get(cv2.CAP_PROP_FPS)
+    width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+    height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+    cap.release()
+
+    output_video_path = "output_overlay.mp4"
+    # Using mp4v codec for standard MP4 generation
+    fourcc = cv2.VideoWriter_fourcc(*'mp4v')
+    out_video = cv2.VideoWriter(output_video_path, fourcc, fps, (width, height))
+
     results = yolo_model.track(
         source=video_path, tracker="bytetrack.yaml", classes=[14],
         conf=0.15, iou=0.6, imgsz=640, persist=True, stream=True, verbose=False
@@ -96,6 +107,11 @@ def process_video_pipeline(video_path, progress_callback=None):
 
     for r in results:
         active_in_this_frame = []
+        
+        # Grab YOLO's beautiful annotated frame (bounding boxes + masks + IDs)
+        annotated_frame = r.plot()
+        out_video.write(annotated_frame) # Write it to our new video file!
+
         if r.boxes is not None and r.boxes.id is not None:
             boxes = r.boxes.xyxy.cpu().numpy()
             track_ids = r.boxes.id.int().cpu().numpy()
@@ -121,6 +137,9 @@ def process_video_pipeline(video_path, progress_callback=None):
         birds_per_frame.append(len(active_in_this_frame))
         frames_active_ids.append(set(active_in_this_frame))
 
+    # Release the video writer when the video is done generating
+    out_video.release()
+    
     if progress_callback:
         progress_callback(0.5, desc="🧮 Running Ensemble Counting Logic...")
 
@@ -158,11 +177,11 @@ def process_video_pipeline(video_path, progress_callback=None):
    # --- 4. CLASSIFICATION ---
     valid_real_ids = [tid for tid, count in id_frame_counts.items() if count >= 10]
     species_tally = Counter()
-    species_confidences = defaultdict(list) # NEW: Tracks confidences!
+    species_confidences = defaultdict(list) # Tracks confidences!
     
     for track_id in valid_real_ids:
         species_votes = Counter()
-        track_confs = defaultdict(list) # NEW: Confidences for this specific track
+        track_confs = defaultdict(list) # Confidences for this specific track
         sharpest_crops = id_top_crops[track_id]
         
         for score, crop_bgr in sharpest_crops:
@@ -220,4 +239,13 @@ def process_video_pipeline(video_path, progress_callback=None):
             
         final_ui_data[species] = {"count": count, "confidence": conf_str}
 
-    return final_ui_data
+    if progress_callback:
+        progress_callback(0.95, desc="🎬 Converting video for web playback...")
+
+    # 🚨 NEW: Convert the video to a web-safe H.264 format using FFmpeg
+    web_output_path = "web_output_overlay.mp4"
+    # The -y flag overwrites old files, -vcodec libx264 forces the web-safe codec
+    os.system(f"ffmpeg -y -i {output_video_path} -vcodec libx264 -preset fast {web_output_path}")
+
+    # Return the dictionary AND the newly converted web-safe video path
+    return final_ui_data, web_output_path
